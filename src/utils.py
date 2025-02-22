@@ -3,6 +3,7 @@ import os
 import torch
 from torch import nn
 from torch import hub
+from silero_vad import load_silero_vad, read_audio, get_speech_timestamps
 
 import librosa
 
@@ -12,10 +13,7 @@ def get_speech_and_silence_timestamps(waveform: torch.Tensor,
                                       threshold: float = 0.6,
                                       min_speech_duration_ms: int = 500,
                                       min_silence_duration_ms: int = 1000):
-    speech_model, utils = hub.load(repo_or_dir='snakers4/silero-vad', model='silero_vad')
-
-    (get_speech_timestamps, _, _, _, _) = utils
-
+    speech_model = load_silero_vad()
     duration = waveform.shape[0] // sr
 
     speech_timestamps = get_speech_timestamps(waveform, speech_model, threshold=threshold,
@@ -50,7 +48,7 @@ def remove_silence(waveform: torch.Tensor,
                    threshold: float = 0.6,
                    min_speech_duration_ms: int = 500,
                    min_silence_duration_ms: int = 1000
-                   ):
+                   ) -> torch.Tensor:
     _, _, speech_timestamps, _, _, _, _, _ = get_speech_and_silence_timestamps(waveform, sr,
                                                                                return_seconds=return_seconds,
                                                                                threshold=threshold,
@@ -67,9 +65,40 @@ def remove_silence(waveform: torch.Tensor,
     return output
 
 
-class RemoveSilence(nn.Module):
-    def __init__(self):
-        super(RemoveSilence, self).__init__()
+class SignalWindowing(torch.nn.Module):
 
-    def forward(self, signal, timestamps=None):
-        ...
+    def __init__(self,
+                 window_size: int,
+                 stride: int,
+                 with_silence: bool = True,
+                 sr: int = 8_000,
+                 threshold: float = 0.6,
+                 min_speech_duration_ms: int = 500,
+                 min_silence_duration_ms: int = 1000):
+
+        super(SignalWindowing, self).__init__()
+        self.window_size = window_size
+        self.stride = stride
+        self.with_silence = with_silence
+        self.sr = sr
+        self.threshold = threshold
+        self.min_speech_duration_ms = min_speech_duration_ms
+        self.min_silence_duration_ms = min_silence_duration_ms
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        signal = x
+        if not self.with_silence:
+            signal = remove_silence(signal, sr=self.sr, threshold=self.threshold,
+                                    min_speech_duration_ms=self.min_speech_duration_ms,
+                                    min_silence_duration_ms=self.min_silence_duration_ms)
+
+        remainder = (signal.shape[-1] - self.window_size) % self.stride
+        pad_count = 0
+
+        if remainder != 0:
+            pad_count = self.stride - remainder
+
+        signal = torch.nn.functional.pad(signal, (0, pad_count), "constant", 0)
+        chunks = signal.unfold(-1, self.window_size, self.stride)
+
+        return chunks
