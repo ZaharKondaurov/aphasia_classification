@@ -1,4 +1,5 @@
 from torch import nn
+import torchvision.models as models
 
 
 class CNNModel(nn.Module):
@@ -42,4 +43,33 @@ class CNNModel(nn.Module):
         x = self.conv_layers(x)
         x = self.global_avg_pool(x)
         x = self.fc_layers(x)
+        return x
+
+
+class MobileNet(nn.Module):
+
+    def __init__(self, num_classes=2, ):
+        super(MobileNet, self).__init__()
+        self.features = models.mobilenet_v3_large(pretrained=False)
+
+        for child in self.features.children():
+            for param in child.parameters():
+                param.requires_grad = True
+
+        in_features = self.features.classifier[0].in_features
+
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(in_features, 256),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(256, num_classes)
+        )
+
+        self.features.classifier = self.classifier
+
+    def forward(self, x):
+        x = x.repeat(1, 3, 1, 1)
+
+        x = self.features(x)
         return x
