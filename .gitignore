@@ -4,8 +4,6 @@ __pycache__/
 __pypackages__/
 .pytest_cache/
 data/*
-!data/aphasia_timestamps.csv
-!data/norm_timestamps.csv
 */mlruns/*
 */runs/*
 */lightning_logs/*
