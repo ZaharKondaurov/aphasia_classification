@@ -69,7 +69,8 @@ class MobileNet(nn.Module):
         self.features.classifier = self.classifier
 
     def forward(self, x):
-        x = x.repeat(1, 3, 1, 1)
+        if x.shape[1] < 3:
+            x = x.repeat(1, 3, 1, 1)
 
         x = self.features(x)
         return x

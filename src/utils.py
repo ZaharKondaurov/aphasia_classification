@@ -137,7 +137,9 @@ class AphasiaDataset(Dataset):
                  room_height: Tuple[float, float] = (3., 4.),
                  noise_dir: str = None,
                  rirs_dir: str = None,
+                 file_format: str = "3gp",
                  transforms=None):
+        self.file_format = file_format
         self.root_dir = root_dir
         self.target_sample_rate = target_sample_rate
         self.fft_size = fft_size
@@ -269,16 +271,16 @@ class AphasiaDataset(Dataset):
 
     def find_audio_file(self, file_name, label):
         """Ищем файл в соответствующей папке по метке"""
-        folder = "Aphasia" if label == 1 else "Norm"
+        folder = "Aphasia" if label > 0 else "Norm"
         file_name = file_name[:-4]
-        file_path = os.path.join(self.root_dir, folder, f"{file_name}.3gp")  # Убрано ".wav"
+        file_path = os.path.join(self.root_dir, folder, f"{file_name}.{self.file_format}")  # Убрано ".wav"
         if os.path.exists(file_path):
             return file_path
-        print(f"Warning: {file_name}.3gp not found in {folder} folder.")
+        print(f"Warning: {file_name}.{self.file_format} not found in {folder} folder.")
         return None
 
     def process_audio(self, file_path):
-        audio = AudioSegment.from_file(file_path, format="3gp")
+        audio = AudioSegment.from_file(file_path, format=self.file_format)
         duration = len(audio)  # в миллисекундах
         segments = []
 
@@ -317,11 +319,13 @@ class AphasiaDatasetSpectrogram(AphasiaDataset):
                  snr: Union[int, Tuple[int, int]] = 0,
                  room_square: Tuple[float, float] = (7., 14.),
                  room_height: Tuple[float, float] = (3., 4.),
-                 noise_dir=None,
+                 noise_dir: str = None,
+                 rirs_dir: str = None,
+                 file_format: str = "3gp",
                  transforms=None):
         super(AphasiaDatasetSpectrogram, self).__init__(csv_file, root_dir, target_sample_rate, fft_size,
                  hop_length, win_length, min_duration, max_duration, add_noise, snr, room_square,
-                                                        room_height, noise_dir, transforms)
+                                                        room_height, noise_dir, rirs_dir, file_format, transforms)
 
     def preprocess(self, segment):
         try:
@@ -341,6 +345,10 @@ class AphasiaDatasetSpectrogram(AphasiaDataset):
                 waveform = self.add_noise_and_reverb(waveform)
 
             y = waveform.numpy().squeeze()
+
+            if self.transforms is not None:
+                y = self.transforms(samples=y, sample_rate=self.target_sample_rate)
+
             spectrogram = librosa.stft(y, n_fft=self.fft_size, hop_length=self.hop_length, win_length=self.win_length)
             mag = np.abs(spectrogram).astype(np.float32)
             return torch.tensor(mag.T).unsqueeze(0)
@@ -357,7 +365,9 @@ class AphasiaDatasetMFCC(AphasiaDataset):
                  snr: Union[int, Tuple[int, int]] = 0,
                  room_square: Tuple[float, float] = (7., 14.),
                  room_height: Tuple[float, float] = (3., 4.),
-                 noise_dir=None,
+                 noise_dir: str = None,
+                 rirs_dir: str = None,
+                 file_format: str = "3gp",
                  transforms=None):
         self.mfcc_class = torchaudio.transforms.MFCC(sample_rate=8_000, n_mfcc=mfcc,
                                                      log_mels=True, melkwargs={"n_fft": fft_size,
@@ -366,7 +376,7 @@ class AphasiaDatasetMFCC(AphasiaDataset):
                                                                                "n_mels": n_mels})
         super(AphasiaDatasetMFCC, self).__init__(csv_file, root_dir, target_sample_rate, fft_size,
                  hop_length, win_length, min_duration, max_duration, add_noise, snr, room_square,
-                                                        room_height, noise_dir, transforms)
+                                                        room_height, noise_dir, rirs_dir, file_format, transforms)
 
     def preprocess(self, segment):
         try:
@@ -384,6 +394,10 @@ class AphasiaDatasetMFCC(AphasiaDataset):
 
             if self.add_noise:
                 waveform = self.add_noise_and_reverb(waveform)
+
+            if self.transforms is not None:
+                waveform = torch.from_numpy(self.transforms(samples=waveform.numpy().squeeze(),
+                                                            sample_rate=self.target_sample_rate))
 
             y = waveform.squeeze()
 
@@ -403,14 +417,16 @@ class AphasiaDatasetWaveform(AphasiaDataset):
                  snr: Union[int, Tuple[int, int]] = 0,
                  room_square: Tuple[float, float] = (7., 14.),
                  room_height: Tuple[float, float] = (3., 4.),
-                 noise_dir=None,
+                 noise_dir: str = None,
+                 rirs_dir: str = None,
+                 file_format: str = "3gp",
                  transforms=None):
         super(AphasiaDatasetWaveform, self).__init__(csv_file, root_dir, target_sample_rate,
                                                  hop_length=hop_length, win_length=win_length,
                                                      min_duration=min_duration, max_duration=max_duration,
                                                      add_noise=add_noise, snr=snr, room_square=room_square,
-                                                     room_height=room_height, noise_dir=noise_dir,
-                                                     transforms=transforms)
+                                                     room_height=room_height, noise_dir=noise_dir, rirs_dir=rirs_dir,
+                                                     file_format=file_format, transforms=transforms)
 
     def preprocess(self, segment):
         buffer = BytesIO()
@@ -424,6 +440,9 @@ class AphasiaDatasetWaveform(AphasiaDataset):
 
         if self.add_noise:
             waveform = self.add_noise_and_reverb(waveform)
+
+        if self.transforms is not None:
+            waveform = torch.from_numpy(self.transforms(samples=waveform.numpy(), sample_rate=self.target_sample_rate))
 
         return waveform
 
