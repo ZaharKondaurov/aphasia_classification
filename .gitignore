@@ -7,3 +7,7 @@ data/*
 */mlruns/*
 */runs/*
 */lightning_logs/*
+checkpoints/
+!checkpoints/.gitignore
+notebooks/sandbox.ipynb
+notebooks/catboost_*
