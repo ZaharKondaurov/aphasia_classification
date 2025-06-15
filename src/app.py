@@ -42,8 +42,8 @@ def load_model(name: str, path: str):
 def load_readme():
     with open("README.md", "r", encoding="utf-8") as file:
         file_content = file.read()
-    new_path = os.path.join(BASE_DIR, "images")
-    file_content = re.sub(r'src="images/', f'src="{str(new_path)}/', file_content)
+    # new_path = os.path.join(BASE_DIR, "images")
+    # file_content = re.sub(r'src="images/', f'src="{os.path.join(BASE_DIR, 'images/')}', file_content)
     return file_content
 
 selected = option_menu(None, ["Home", "Experiments"],

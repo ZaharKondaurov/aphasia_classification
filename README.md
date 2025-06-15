@@ -85,6 +85,17 @@ MFCC — представление аудио представляющие со
 | MobileNet, MFCC, <br/> нарезка на куски по 10-15 с.,<br/> 10 эпох, валидация на кусках | accuracy: 0.94 <br/> f1 pos=norm: 0.76 <br/> f1 pos=aphasia: 0.96 | accuracy: 0.97 <br/> f1 pos=norm: 0.95 <br/> f1 pos=aphasia: 0.98 |
 | MobileNet, MFCC, <br/> нарезка на куски по 10-15 с.,<br/> 10 эпох, валидация на целых  | accuracy: 0.92 <br/> f1 pos=norm: 0.82 <br/> f1 pos=aphasia: 0.95 | accuracy: 0.92 <br/> f1 pos=norm: 0.85 <br/> f1 pos=aphasia: 0.94 |
 
+<img style="display: block; margin: auto;" src="images/swishnet_architecture.png" alt="">
+<p style="text-align: center;">Архитектура SwishNet</p>
+
+<img style="display: block; margin: auto;" src="images/mobilenetv3large_architecture.png" alt="">
+<p style="text-align: center;">Архитектура MobileNet v3 large</p>
+
+<img style="display: block; margin: auto;" src="images/bottleneck.png" alt="">
+<p style="text-align: center;">MobileNet v3 large bottleneck</p>
+
+
+
 ## Waveform
 
 Одна из очевидных идей — взять сырое аудио и засунуть в трансформер. Далее результаты использования wav2vec
@@ -93,6 +104,9 @@ MFCC — представление аудио представляющие со
 |------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------|-------------------------------------------------------------------|
 | Wav2vec Classifier, сырой сигнал, <br/> нарезка на куски по 10-15 с, <br/> 30 эпох, валидация на кусках          | accuracy: 0.98 <br/> f1 pos=norm: 0.90 <br/> f1 pos=aphasia: 0.99 | accuracy: 0.96 <br/> f1 pos=norm: 0.92 <br/> f1 pos aphasia: 0.97 |
 | Wav2vec Classifier, сырой сигнал, <br/> нарезка на куски по 10-15 с, <br/> 30 эпох, валидация на целых сигналах  | accuracy: 0.93 <br/> f1 pos=norm: 0.86 <br/> f1 pos=aphasia: 0.95 | accuracy: 0.93 <br/> f1 pos=norm: 0.88 <br/> f1 pos=aphasia: 0.95 |
+
+<img style="display: block; margin: auto;" src="images/wav2vec_architecture.png" alt="">
+<p style="text-align: center;">Архитектура Wav2vec</p>
 
 ## Спектрограммы
 
