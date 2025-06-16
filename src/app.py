@@ -8,10 +8,9 @@ import streamlit as st
 from streamlit_option_menu import option_menu
 
 import torch
-import torchvision.transforms as tr
 import tempfile
 
-from utils import get_spectrogram, get_waveform, get_mfcc
+from utils import get_waveform, get_mfcc
 
 from models.cnn import MobileNet
 from models.wav2vecClassifier import Wav2vecClassifier
@@ -19,8 +18,6 @@ from st_audiorec import st_audiorec
 
 from pydub import AudioSegment
 
-import sys
-import re
 import os
 
 @st.cache_resource
@@ -42,8 +39,6 @@ def load_model(name: str, path: str):
 def load_readme():
     with open("README.md", "r", encoding="utf-8") as file:
         file_content = file.read()
-    # new_path = os.path.join(BASE_DIR, "images")
-    # file_content = re.sub(r'src="images/', f'src="{os.path.join(BASE_DIR, 'images/')}', file_content)
     return file_content
 
 selected = option_menu(None, ["Home", "Experiments"],
@@ -70,7 +65,9 @@ if selected == "Home":
     model = load_model(model_name, models_dict[model_name])
     model.eval()
 
-    status = st.radio("Select Mode: ", ('Upload files (5 or less files)', 'Record your voice'))
+    status = st.radio("Select input style: ", ('Upload files (5 or less files)', 'Record your voice'))
+    output_status = st.radio("Select mode: ", ('Display predictions for each audio', 'Display mean prediction'))
+
     rec = False
     if status == 'Upload files (5 or less files)':
         st.write("Upload an audio file (e.g., WAV) to detect signs of aphasia.")
@@ -95,10 +92,10 @@ if selected == "Home":
             if len(input_files) > MAX_FILES:
                 st.warning(f"You uploaded {len(input_files)} files. Please upload no more than {MAX_FILES}.")
             else:
-                if not rec and st.button("Start Prediction"):
-                    for uploaded_file in input_files:
+                if (not rec) and st.button("Start Prediction"):
+                    for ind, uploaded_file in enumerate(input_files):
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
-                            if status == 'Upload files':
+                            if status == 'Upload files (5 or less files)':
                                 tmp_file.write(uploaded_file.read())
                                 tmp_path = tmp_file.name
                             else:
@@ -142,14 +139,22 @@ if selected == "Home":
                                 st.error(f"Prediction error: {e}")
                                 st.stop()
 
-                    # Display result
-                    st.success("Analysis complete.")
-                    st.write(f"**Aphasia probability:** {sum(probs) / len(probs):.2%}")
+                        if output_status == 'Display predictions for each audio':
+                            st.write(f"**Aphasia probability for #{ind + 1} file:** {prob:.2%}")
 
-                    if sum(probs) / len(probs) > 0.5:
-                        st.error("Signs of aphasia detected.")
-                    else:
-                        st.success("No signs of aphasia detected.")
+                            if prob > 0.5:
+                                st.error("Signs of aphasia detected.")
+                            else:
+                                st.success("No signs of aphasia detected.")
+
+                    if output_status == 'Display mean prediction':
+                        st.success("Analysis complete.")
+                        st.write(f"**Aphasia probability:** {sum(probs) / len(probs):.2%}")
+
+                        if sum(probs) / len(probs) > 0.5:
+                            st.error("Signs of aphasia detected.")
+                        else:
+                            st.success("No signs of aphasia detected.")
 else:
     text_content = load_readme()
     st.markdown(text_content, unsafe_allow_html=True)
