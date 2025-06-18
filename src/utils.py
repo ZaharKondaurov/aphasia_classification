@@ -25,6 +25,8 @@ import pyroomacoustics as pra
 
 from transformers import Wav2Vec2Processor
 
+from functools import wraps
+
 from typing import Union, Tuple
 
 
@@ -138,7 +140,8 @@ class AphasiaDataset(Dataset):
                  noise_dir: str = None,
                  rirs_dir: str = None,
                  file_format: str = "3gp",
-                 transforms=None):
+                 transforms=None,
+                 triplet=False):
         self.file_format = file_format
         self.root_dir = root_dir
         self.target_sample_rate = target_sample_rate
@@ -157,6 +160,7 @@ class AphasiaDataset(Dataset):
         self.noise_dir = noise_dir
         self.noise_files = None
         self.rirs_dir = rirs_dir
+        self.triplet = triplet
 
         if self.noise_dir is not None:
             self.noise_files = os.listdir(self.noise_dir)
@@ -166,7 +170,8 @@ class AphasiaDataset(Dataset):
 
         # Загружаем список файлов из CSV
         df = pd.read_csv(csv_file)
-
+        self.labels = []
+        self.data_dict = {}
         # Обработка и сегментация аудио
         for _, row in df.iterrows():
             file_name, label = row['file_name'], row['label']
@@ -175,6 +180,12 @@ class AphasiaDataset(Dataset):
                 try:
                     segments = self.process_audio(file_path)
                     self.data.extend([(s, label) for s in segments])
+                    if label not in self.data_dict:
+                        self.data_dict[label] = [(s, label) for s in segments]
+                    else:
+                        self.data_dict[label].extend([(s, label) for s in segments])
+                    if label not in self.labels:
+                        self.labels.append(label)
                 except Exception as e:
                     print(f"Error processing {file_path}: {str(e)}")
 
@@ -306,9 +317,23 @@ class AphasiaDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        elem, label = self.data[idx]
+        if self.triplet:
+            elem, label = self.data[idx]
 
-        return elem, torch.tensor(label, dtype=torch.long)
+            # pos_data = [x for x in self.data if x[1] == label]
+            pos_data = self.data_dict[label]
+            neg_label = choice([x for x in self.labels if x != label])
+            neg_data = self.data_dict[neg_label]
+            # neg_data = [x for x in self.data if x[1] == neg_label]
+
+            pos_elem, _ = choice(pos_data)
+            neg_elem, _ = choice(neg_data)
+
+            return elem, pos_elem, neg_elem
+        else:
+            elem, label = self.data[idx]
+
+            return elem, torch.tensor(label, dtype=torch.long)
 
 
 class AphasiaDatasetSpectrogram(AphasiaDataset):
@@ -322,10 +347,12 @@ class AphasiaDatasetSpectrogram(AphasiaDataset):
                  noise_dir: str = None,
                  rirs_dir: str = None,
                  file_format: str = "3gp",
-                 transforms=None):
+                 transforms=None,
+                 triplet: bool = False,):
         super(AphasiaDatasetSpectrogram, self).__init__(csv_file, root_dir, target_sample_rate, fft_size,
                  hop_length, win_length, min_duration, max_duration, add_noise, snr, room_square,
-                                                        room_height, noise_dir, rirs_dir, file_format, transforms)
+                                                        room_height, noise_dir, rirs_dir, file_format, transforms,
+                                                        triplet)
 
     def preprocess(self, segment):
         try:
@@ -368,7 +395,8 @@ class AphasiaDatasetMFCC(AphasiaDataset):
                  noise_dir: str = None,
                  rirs_dir: str = None,
                  file_format: str = "3gp",
-                 transforms=None):
+                 transforms=None,
+                 triplet: bool = False):
         self.mfcc_class = torchaudio.transforms.MFCC(sample_rate=8_000, n_mfcc=mfcc,
                                                      log_mels=True, melkwargs={"n_fft": fft_size,
                                                                                "win_length": win_length,
@@ -376,7 +404,7 @@ class AphasiaDatasetMFCC(AphasiaDataset):
                                                                                "n_mels": n_mels})
         super(AphasiaDatasetMFCC, self).__init__(csv_file, root_dir, target_sample_rate, fft_size,
                  hop_length, win_length, min_duration, max_duration, add_noise, snr, room_square,
-                                                        room_height, noise_dir, rirs_dir, file_format, transforms)
+                 room_height, noise_dir, rirs_dir, file_format, transforms, triplet)
 
     def preprocess(self, segment):
         try:
@@ -420,13 +448,14 @@ class AphasiaDatasetWaveform(AphasiaDataset):
                  noise_dir: str = None,
                  rirs_dir: str = None,
                  file_format: str = "3gp",
-                 transforms=None):
+                 transforms=None,
+                 triplet: bool = False):
         super(AphasiaDatasetWaveform, self).__init__(csv_file, root_dir, target_sample_rate,
                                                  hop_length=hop_length, win_length=win_length,
                                                      min_duration=min_duration, max_duration=max_duration,
                                                      add_noise=add_noise, snr=snr, room_square=room_square,
                                                      room_height=room_height, noise_dir=noise_dir, rirs_dir=rirs_dir,
-                                                     file_format=file_format, transforms=transforms)
+                                                     file_format=file_format, transforms=transforms, triplet=triplet)
 
     def preprocess(self, segment):
         buffer = BytesIO()
@@ -447,136 +476,40 @@ class AphasiaDatasetWaveform(AphasiaDataset):
         return waveform
 
 
-# class AphasiaDatasetNoise(AphasiaDataset):
-#
-#     def __init__(self, csv_file, root_dir, target_sample_rate=16000,
-#                  hop_length=256, win_length=512, min_duration=10, max_duration=15, transforms=None,
-#                  snr: Union[int, Tuple[int, int]] = 0,
-#                  room_square: Tuple[float, float] = (7., 14.),
-#                  room_height: Tuple[float, float] = (3., 4.),
-#                  noise_dir=None):
-#         self.snr = snr
-#         self.room_height = room_height
-#         self.room_square = room_square
-#         self.noise_dir = noise_dir
-#         self.noise_files = None
-#         if self.noise_dir is not None:
-#             self.noise_files = os.listdir(noise_dir)
-#         super(AphasiaDatasetNoise, self).__init__(csv_file, root_dir, target_sample_rate,
-#                                                  hop_length=hop_length, win_length=win_length,
-#                                                      min_duration=min_duration, max_duration=max_duration,
-#                                                      transforms=transforms)
-#
-#     @staticmethod
-#     def simulate_noise(signal: torch.Tensor, noise: torch.Tensor, snr_db: int) -> torch.Tensor:
-#         len_noise = noise.shape[-1]
-#         noise_cat = [noise]
-#         while len_noise < signal.shape[-1]:
-#             len_noise += noise.shape[-1]
-#             noise_cat.append(noise)
-#         noise = torch.cat(noise_cat, dim=-1)
-#
-#         if noise.shape[-1] > signal.shape[-1]:
-#             noise = noise[..., :signal.shape[-1]]
-#
-#         rms_signal = torch.sqrt(torch.mean(signal ** 2))
-#         rms_noise = torch.sqrt(torch.mean(noise ** 2))
-#
-#         target_rms_noise = rms_signal / (10 ** (snr_db / 10))
-#
-#         noise = noise * (target_rms_noise / rms_noise)
-#
-#         return noise
-#
-#     def simulate_rir_shoebox(self, signal: torch.Tensor) -> torch.Tensor:
-#         square = uniform(*self.room_square)
-#         width = uniform(2.5, square * 0.75)
-#         length = square / width
-#         height = uniform(*self.room_height)
-#
-#         rt60 = uniform(0.3, 1.25)   # Делать длинный ревёрб
-#         room_dim = [length, width, height]
-#
-#         e_absorption, max_order = pra.inverse_sabine(rt60, room_dim)
-#
-#         wall = pra.Material(choice(WALLS_KEYWORDS))
-#         ceil = pra.Material(choice(CEILING_KEYWORDS))
-#         floor = pra.Material(choice(FLOOR_KEYWORDS))
-#
-#         material = {"east": wall, "west": wall, "north": wall, "south": wall, "ceiling": ceil, "floor": floor}
-#
-#         room = pra.ShoeBox(room_dim, fs=self.target_sample_rate, materials=material, max_order=max_order,
-#                            use_rand_ism=True, max_rand_disp=0.05, ray_tracing=False)
-#
-#         source_locs = [uniform(0.01, length), uniform(0.01, width), uniform(1.0, 2.0)]
-#         mic_locs = np.array([x * 0.98 for x in source_locs])[:, None]
-#
-#         room.add_source(source_locs, signal=signal.squeeze(), delay=0.5)
-#
-#         room.add_microphone_array(mic_locs)
-#         room.compute_rir()
-#         room.simulate()     # Внутри есть параметр snr, возможно, он пригодится
-#
-#         return room.rir[0][0]   # [микрофон, источник]
-#
-#     def preprocess(self, segment):
-#         buffer = BytesIO()
-#         segment.export(buffer, format="wav")
-#         buffer.seek(0)
-#         waveform, sample_rate = torchaudio.load(buffer)
-#
-#         if sample_rate != self.target_sample_rate:
-#             resampler = Resample(sample_rate, self.target_sample_rate)
-#             waveform = resampler(waveform)
-#
-#         if isinstance(self.snr, tuple):
-#             snr_db = randint(self.snr[0], self.snr[1])
-#         else:
-#             snr_db = self.snr
-#
-#         rir = self.simulate_rir_shoebox(waveform)[None, :]
-#
-#         rir_signal = torch.from_numpy(fftconvolve(waveform, rir, mode='same', axes=-1))
-#
-#         if self.noise_dir is not None:
-#             filename_noise = choice(self.noise_files)
-#             noise, noise_sr = torchaudio.load(os.path.join(self.noise_dir, filename_noise))
-#
-#             if noise_sr != self.target_sample_rate:
-#                 resampler = Resample(noise_sr, self.target_sample_rate)
-#                 noise = resampler(noise)
-#
-#             # noise = torch.from_numpy(noise).float()
-#             noise = self.simulate_noise(rir_signal, noise, snr_db)
-#
-#             output = rir_signal + noise
-#
-#             return output
-#
-#         return rir_signal
+def inference_preprocessing(func):
+    @wraps(func)
+    def wrapper(*args, audio_path, sr, **kwargs):
+        waveform, sample_rate = torchaudio.load(audio_path)
+
+        if sample_rate != sr:
+            resampler = Resample(sample_rate, sr)
+            waveform = resampler(waveform)
+
+        output = func(*args, waveform=waveform, sr=sr, **kwargs)
+
+        return output
+
+    return wrapper
 
 
-# class AphasiaDatasetWav2vec(AphasiaDataset):
-#
-#     def __init__(self, csv_file, root_dir, target_sample_rate=16000,
-#                  hop_length=256, win_length=512, min_duration=10, max_duration=15):
-#         super(AphasiaDatasetWaveform, self).__init__(csv_file, root_dir, target_sample_rate,
-#                                                  hop_length=hop_length, win_length=win_length,
-#                                                      min_duration=min_duration, max_duration=max_duration)
-#
-#         self.processor = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-base",
-#                                                            sampling_rate=target_sample_rate)
-#
-#     def preprocess(self, segment):
-#         buffer = BytesIO()
-#         segment.export(buffer, format="wav")
-#         buffer.seek(0)
-#         waveform, sample_rate = torchaudio.load(buffer)
-#
-#         if sample_rate != self.target_sample_rate:
-#             resampler = Resample(sample_rate, self.target_sample_rate)
-#             waveform = resampler(waveform)
-#
-#         y = self.processor(waveform, sampling_rate=sample_rate).input_values[0]
-#
-#         return y
+@inference_preprocessing
+def get_spectrogram(n_fft, hop_length, win_length, waveform, sr):
+    spectrogram = librosa.stft(waveform.numpy(), n_fft=n_fft, hop_length=hop_length, win_length=win_length)
+    mag = np.abs(spectrogram).astype(np.float32)
+    return torch.from_numpy(mag)
+
+
+@inference_preprocessing
+def get_waveform(waveform, sr):
+    return waveform
+
+
+@inference_preprocessing
+def get_mfcc(n_mfcc, n_fft, hop_length, win_length, n_mels, waveform, sr):
+    mfcc_class = torchaudio.transforms.MFCC(sample_rate=sr, n_mfcc=n_mfcc,
+                                                 log_mels=True, melkwargs={"n_fft": n_fft,
+                                                                           "win_length": win_length,
+                                                                           "hop_length": hop_length,
+                                                                           "n_mels": n_mels})
+    mfcc = mfcc_class(waveform)
+    return mfcc
