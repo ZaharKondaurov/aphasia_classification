@@ -11,16 +11,20 @@
   * aphasia_audio_chunks — обучение CNN на спектрограммах (аудио разбиты на чанки)
   * aphasia_experiments — обучение CNN на спектрограммах 
   * base_analysis — EDA
+  * careful_whisper_data_prep — подготовка данных для CarefulWhisper 
   * catboost_test — Обучение CatBoost
   * cnn_mc_test — Обучение CNN для мультклассовой задачи
+  * data_for_reranker — Подготовка данных для BGE-Reranker
   * data_splitting — разбиение данных
   * data_splitting_multiclass — разбиение данных для мультиклассовой задачи
   * hubert_test_mc — Обучение Hubert для мультиклассовой задачи
   * hubert_test_mc_triplet — Обучение Hubert для мультиклассовой задачи. Hubert изначально обучался на triplet loss
+  * ml_cw_test — Эксперимент с CarefulWhisper
   * ml_test_all_features — Эксперименты с классическим ML
   * robustness_test — Проверка устойчивости моделей к аугментациям
   * swishnet_chunked_test — Обучение SwishNet на чанках аудио
   * swishnet_test — Обучение SwishNet целом аудио
+  * train_reranker — Обучение BGE-Reranker
   * wav2vec_mc_test — Обучение Wav2Vec для мультиклассовой задачи
   * wav2vec_test — Обучение Wav2Vec
   * wav2vec_test_2 — Тестирование Wav2Veс (предсказание для испытуемого, а не для аудио; предсказания для целых аудио)
