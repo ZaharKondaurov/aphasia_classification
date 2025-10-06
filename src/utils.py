@@ -40,7 +40,7 @@ def get_speech_and_silence_timestamps(waveform: torch.Tensor,
                                       min_speech_duration_ms: int = 500,
                                       min_silence_duration_ms: int = 1000):
     speech_model = load_silero_vad()
-    duration = waveform.shape[0] // sr
+    duration = waveform.shape[-1] # // sr
 
     speech_timestamps = get_speech_timestamps(waveform, speech_model, threshold=threshold,
                                               min_speech_duration_ms=min_speech_duration_ms,
@@ -85,7 +85,6 @@ def remove_silence(waveform: torch.Tensor,
     for ts in speech_timestamps:
         output.append(waveform[ts['start'] * sr // 1000: ts['end'] * sr // 1000, ...])
 
-    # print(len(output), output)
     if len(output) == 0 or len(output[0]) == 0:
         output = [waveform]
     output = torch.concatenate(output, dim=0)
@@ -118,7 +117,7 @@ class SignalWindowing(torch.nn.Module):
             signal = remove_silence(signal, sr=self.sr, threshold=self.threshold,
                                     min_speech_duration_ms=self.min_speech_duration_ms,
                                     min_silence_duration_ms=self.min_silence_duration_ms)
-        # print(signal.shape)
+
         remainder = (signal.shape[-1] - self.window_size) % self.stride
         pad_count = 0
 
@@ -129,6 +128,7 @@ class SignalWindowing(torch.nn.Module):
         chunks = signal.unfold(-1, self.window_size, self.stride)
 
         return chunks
+
 
 class AphasiaDataset(Dataset):
     def __init__(self, csv_file, root_dir, target_sample_rate=16000, fft_size=512,
@@ -259,10 +259,6 @@ class AphasiaDataset(Dataset):
 
             signal = torch.from_numpy(fftconvolve(signal, rir[None, :], mode='same', axes=-1))
 
-        # rir = self.simulate_rir_shoebox(signal)[None, :]
-        #
-        # rir_signal = torch.from_numpy(fftconvolve(signal, rir, mode='same', axes=-1))
-
         if self.noise_dir is not None:
             filename_noise = choice(self.noise_files)
             noise, noise_sr = torchaudio.load(os.path.join(self.noise_dir, filename_noise))
@@ -271,7 +267,6 @@ class AphasiaDataset(Dataset):
                 resampler = Resample(noise_sr, self.target_sample_rate)
                 noise = resampler(noise)
 
-            # noise = torch.from_numpy(noise).float()
             noise = self.simulate_noise(signal, noise, snr_db)
 
             output = signal + noise
@@ -320,11 +315,9 @@ class AphasiaDataset(Dataset):
         if self.triplet:
             elem, label = self.data[idx]
 
-            # pos_data = [x for x in self.data if x[1] == label]
             pos_data = self.data_dict[label]
             neg_label = choice([x for x in self.labels if x != label])
             neg_data = self.data_dict[neg_label]
-            # neg_data = [x for x in self.data if x[1] == neg_label]
 
             pos_elem, _ = choice(pos_data)
             neg_elem, _ = choice(neg_data)

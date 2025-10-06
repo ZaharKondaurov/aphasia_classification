@@ -18,6 +18,7 @@ from st_audiorec import st_audiorec
 
 from pydub import AudioSegment
 
+import time
 import os
 
 @st.cache_resource
@@ -93,6 +94,7 @@ if selected == "Home":
                 st.warning(f"You uploaded {len(input_files)} files. Please upload no more than {MAX_FILES}.")
             else:
                 if (not rec) and st.button("Start Prediction"):
+                    mean_time = 0
                     for ind, uploaded_file in enumerate(input_files):
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
                             if status == 'Upload files (5 or less files)':
@@ -122,14 +124,19 @@ if selected == "Home":
                         except Exception as e:
                             st.error(f"Error during preprocessing: {e}")
                             st.stop()
+                        compute_time = 0
                         with st.spinner("Analyzing audio..."):
                             try:
                                 model.eval()
                                 with torch.no_grad():
                                     if model_name == "MobileNet":
+                                        start_time = time.time()
                                         output = model(input_audio.float())
+                                        compute_time = time.time() - start_time
                                     elif model_name == "Wav2vec":
+                                        start_time = time.time()
                                         output = model(input_audio.float()).logits
+                                        compute_time = time.time() - start_time
                                     else:
                                         assert "Invalid model name"
                                         st.stop()
@@ -138,9 +145,10 @@ if selected == "Home":
                             except Exception as e:
                                 st.error(f"Prediction error: {e}")
                                 st.stop()
-
+                        mean_time += compute_time
                         if output_status == 'Display predictions for each audio':
                             st.write(f"**Aphasia probability for #{ind + 1} file:** {prob:.2%}")
+                            st.write(f"**Compute time:** {compute_time:.4f}s")
 
                             if prob > 0.5:
                                 st.error("Signs of aphasia detected.")
@@ -150,6 +158,7 @@ if selected == "Home":
                     if output_status == 'Display mean prediction':
                         st.success("Analysis complete.")
                         st.write(f"**Aphasia probability:** {sum(probs) / len(probs):.2%}")
+                        st.write(f"**Compute time:** {mean_time / len(probs):.4f}s")
 
                         if sum(probs) / len(probs) > 0.5:
                             st.error("Signs of aphasia detected.")
