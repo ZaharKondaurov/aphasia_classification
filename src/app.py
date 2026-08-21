@@ -66,12 +66,12 @@ if selected == "Home":
     model = load_model(model_name, models_dict[model_name])
     model.eval()
 
-    status = st.radio("Select input style: ", ('Upload files (5 or less files)', 'Record your voice'))
+    status = 'Upload files (5 or less files)' # st.radio("Select input style: ", ('Upload files (5 or less files)', 'Record your voice'))
     output_status = st.radio("Select mode: ", ('Display predictions for each audio', 'Display mean prediction'))
 
     rec = False
     if status == 'Upload files (5 or less files)':
-        st.write("Upload an audio file (e.g., WAV) to detect signs of aphasia.")
+        st.write("Upload an audio file (e.g., WAV) to detect signs of aphasia (5 or less files).")
 
         input_files = st.file_uploader("Choose an audio file", type=["wav", "mp3", "m4a"], accept_multiple_files=True)
 
@@ -158,7 +158,7 @@ if selected == "Home":
                     if output_status == 'Display mean prediction':
                         st.success("Analysis complete.")
                         st.write(f"**Aphasia probability:** {sum(probs) / len(probs):.2%}")
-                        st.write(f"**Compute time:** {mean_time / len(probs):.4f}s")
+                        st.write(f"**Computation time:** {mean_time / len(probs):.4f}s")
 
                         if sum(probs) / len(probs) > 0.5:
                             st.error("Signs of aphasia detected.")

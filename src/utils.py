@@ -1,4 +1,5 @@
 import os
+import hashlib
 from io import BytesIO
 from abc import ABC, abstractmethod
 
@@ -8,7 +9,6 @@ import pandas as pd
 from scipy.signal import fftconvolve
 
 import random
-from random import randint, uniform, choice, shuffle
 
 from pydub import AudioSegment
 
@@ -33,6 +33,14 @@ from typing import Union, Tuple
 WALLS_KEYWORDS = ["hard_surface", "ceramic_tiles", "plasterboard", "wooden_lining", "glass_3mm"]
 FLOOR_KEYWORDS = ["linoleum_on_concrete", "carpet_cotton"]
 CEILING_KEYWORDS = ["ceiling_plasterboard", "ceiling_fissured_tile", "ceiling_metal_panel", ]
+
+
+def _stable_seed(seed: int, *parts) -> int:
+    hasher = hashlib.md5(str(seed).encode("utf-8"))
+    for part in parts:
+        hasher.update(b"::")
+        hasher.update(str(part).encode("utf-8"))
+    return int(hasher.hexdigest()[:16], 16)
 
 def get_speech_and_silence_timestamps(waveform: torch.Tensor,
                                       sr: int, return_seconds: bool = False,
@@ -141,7 +149,8 @@ class AphasiaDataset(Dataset):
                  rirs_dir: str = None,
                  file_format: str = "3gp",
                  transforms=None,
-                 triplet=False):
+                 triplet=False,
+                 seed=1984):
         self.file_format = file_format
         self.root_dir = root_dir
         self.target_sample_rate = target_sample_rate
@@ -161,12 +170,15 @@ class AphasiaDataset(Dataset):
         self.noise_files = None
         self.rirs_dir = rirs_dir
         self.triplet = triplet
+        self.seed = seed
+        self.rng = random.Random(seed)
+        self._current_rng = self.rng
 
         if self.noise_dir is not None:
-            self.noise_files = os.listdir(self.noise_dir)
+            self.noise_files = sorted(os.listdir(self.noise_dir))
 
         if self.rirs_dir is not None:
-            self.rirs_files = os.listdir(self.rirs_dir)
+            self.rirs_files = sorted(os.listdir(self.rirs_dir))
 
         # Загружаем список файлов из CSV
         df = pd.read_csv(csv_file)
@@ -189,7 +201,11 @@ class AphasiaDataset(Dataset):
                 except Exception as e:
                     print(f"Error processing {file_path}: {str(e)}")
 
-        random.shuffle(self.data)
+        self.rng.shuffle(self.data)
+
+    def _file_rng(self, file_path: str) -> random.Random:
+        stem = os.path.splitext(os.path.basename(file_path))[0]
+        return random.Random(_stable_seed(self.seed, stem))
 
     @staticmethod
     def simulate_noise(signal: torch.Tensor, noise: torch.Tensor, snr_db: int) -> torch.Tensor:
@@ -213,26 +229,27 @@ class AphasiaDataset(Dataset):
         return noise
 
     def simulate_rir_shoebox(self, signal: torch.Tensor) -> torch.Tensor:
-        square = uniform(*self.room_square)
-        width = uniform(2.5, square * 0.75)
+        rng = getattr(self, "_current_rng", self.rng)
+        square = rng.uniform(*self.room_square)
+        width = rng.uniform(2.5, square * 0.75)
         length = square / width
-        height = uniform(*self.room_height)
+        height = rng.uniform(*self.room_height)
 
-        rt60 = uniform(0.3, 1.25)   # Делать длинный ревёрб
+        rt60 = rng.uniform(0.3, 1.25)   # Делать длинный ревёрб
         room_dim = [length, width, height]
 
         e_absorption, max_order = pra.inverse_sabine(rt60, room_dim)
 
-        wall = pra.Material(choice(WALLS_KEYWORDS))
-        ceil = pra.Material(choice(CEILING_KEYWORDS))
-        floor = pra.Material(choice(FLOOR_KEYWORDS))
+        wall = pra.Material(rng.choice(WALLS_KEYWORDS))
+        ceil = pra.Material(rng.choice(CEILING_KEYWORDS))
+        floor = pra.Material(rng.choice(FLOOR_KEYWORDS))
 
         material = {"east": wall, "west": wall, "north": wall, "south": wall, "ceiling": ceil, "floor": floor}
 
         room = pra.ShoeBox(room_dim, fs=self.target_sample_rate, materials=material, max_order=max_order,
                            use_rand_ism=True, max_rand_disp=0.05, ray_tracing=False)
 
-        source_locs = [uniform(0.01, length), uniform(0.01, width), uniform(1.0, 2.0)]
+        source_locs = [rng.uniform(0.01, length), rng.uniform(0.01, width), rng.uniform(1.0, 2.0)]
         mic_locs = np.array([x * 0.98 for x in source_locs])[:, None]
 
         room.add_source(source_locs, signal=signal.squeeze(), delay=0.5)
@@ -244,13 +261,14 @@ class AphasiaDataset(Dataset):
         return room.rir[0][0]   # [микрофон, источник]
 
     def add_noise_and_reverb(self, signal: torch.Tensor) -> torch.Tensor:
+        rng = getattr(self, "_current_rng", self.rng)
         if isinstance(self.snr, tuple):
-            snr_db = randint(self.snr[0], self.snr[1])
+            snr_db = rng.randint(self.snr[0], self.snr[1])
         else:
             snr_db = self.snr
 
         if self.rirs_dir is not None:
-            filename_rir = choice(self.rirs_files)
+            filename_rir = rng.choice(self.rirs_files)
             rir, rir_sr = torchaudio.load(os.path.join(self.rirs_dir, filename_rir))
 
             if rir_sr != self.target_sample_rate:
@@ -260,7 +278,7 @@ class AphasiaDataset(Dataset):
             signal = torch.from_numpy(fftconvolve(signal, rir[None, :], mode='same', axes=-1))
 
         if self.noise_dir is not None:
-            filename_noise = choice(self.noise_files)
+            filename_noise = rng.choice(self.noise_files)
             noise, noise_sr = torchaudio.load(os.path.join(self.noise_dir, filename_noise))
 
             if noise_sr != self.target_sample_rate:
@@ -277,7 +295,7 @@ class AphasiaDataset(Dataset):
 
     def find_audio_file(self, file_name, label):
         """Ищем файл в соответствующей папке по метке"""
-        folder = "Aphasia" if label > 0 else "Norm"
+        folder = "Aphasia" if file_name[0] == "A" else "Norm"
         file_name = file_name[:-4]
         file_path = os.path.join(self.root_dir, folder, f"{file_name}.{self.file_format}")  # Убрано ".wav"
         if os.path.exists(file_path):
@@ -286,6 +304,7 @@ class AphasiaDataset(Dataset):
         return None
 
     def process_audio(self, file_path):
+        self._current_rng = self._file_rng(file_path)
         audio = AudioSegment.from_file(file_path, format=self.file_format)
         duration = len(audio)  # в миллисекундах
         segments = []
@@ -295,7 +314,7 @@ class AphasiaDataset(Dataset):
 
         start = 0
         while start + self.min_duration <= duration:
-            segment_duration = min(random.randint(self.min_duration, self.max_duration), duration - start)
+            segment_duration = min(self._current_rng.randint(self.min_duration, self.max_duration), duration - start)
             end = start + segment_duration
             segment = audio[start:end]
             preprocessed_segment = self.preprocess(segment)
@@ -314,13 +333,14 @@ class AphasiaDataset(Dataset):
     def __getitem__(self, idx):
         if self.triplet:
             elem, label = self.data[idx]
+            rng = random.Random(_stable_seed(self.seed, idx))
 
             pos_data = self.data_dict[label]
-            neg_label = choice([x for x in self.labels if x != label])
+            neg_label = rng.choice([x for x in self.labels if x != label])
             neg_data = self.data_dict[neg_label]
 
-            pos_elem, _ = choice(pos_data)
-            neg_elem, _ = choice(neg_data)
+            pos_elem, _ = rng.choice(pos_data)
+            neg_elem, _ = rng.choice(neg_data)
 
             return elem, pos_elem, neg_elem
         else:
@@ -341,11 +361,12 @@ class AphasiaDatasetSpectrogram(AphasiaDataset):
                  rirs_dir: str = None,
                  file_format: str = "3gp",
                  transforms=None,
-                 triplet: bool = False,):
+                 triplet: bool = False,
+                 seed: int = 1984):
         super(AphasiaDatasetSpectrogram, self).__init__(csv_file, root_dir, target_sample_rate, fft_size,
                  hop_length, win_length, min_duration, max_duration, add_noise, snr, room_square,
                                                         room_height, noise_dir, rirs_dir, file_format, transforms,
-                                                        triplet)
+                                                        triplet, seed)
 
     def preprocess(self, segment):
         try:
@@ -389,7 +410,8 @@ class AphasiaDatasetMFCC(AphasiaDataset):
                  rirs_dir: str = None,
                  file_format: str = "3gp",
                  transforms=None,
-                 triplet: bool = False):
+                 triplet: bool = False,
+                 seed: int = 1984):
         self.mfcc_class = torchaudio.transforms.MFCC(sample_rate=8_000, n_mfcc=mfcc,
                                                      log_mels=True, melkwargs={"n_fft": fft_size,
                                                                                "win_length": win_length,
@@ -397,7 +419,7 @@ class AphasiaDatasetMFCC(AphasiaDataset):
                                                                                "n_mels": n_mels})
         super(AphasiaDatasetMFCC, self).__init__(csv_file, root_dir, target_sample_rate, fft_size,
                  hop_length, win_length, min_duration, max_duration, add_noise, snr, room_square,
-                 room_height, noise_dir, rirs_dir, file_format, transforms, triplet)
+                 room_height, noise_dir, rirs_dir, file_format, transforms, triplet, seed)
 
     def preprocess(self, segment):
         try:
@@ -442,13 +464,15 @@ class AphasiaDatasetWaveform(AphasiaDataset):
                  rirs_dir: str = None,
                  file_format: str = "3gp",
                  transforms=None,
-                 triplet: bool = False):
+                 triplet: bool = False,
+                 seed: int = 1984):
         super(AphasiaDatasetWaveform, self).__init__(csv_file, root_dir, target_sample_rate,
                                                  hop_length=hop_length, win_length=win_length,
                                                      min_duration=min_duration, max_duration=max_duration,
                                                      add_noise=add_noise, snr=snr, room_square=room_square,
                                                      room_height=room_height, noise_dir=noise_dir, rirs_dir=rirs_dir,
-                                                     file_format=file_format, transforms=transforms, triplet=triplet)
+                                                     file_format=file_format, transforms=transforms, triplet=triplet,
+                                                     seed=seed)
 
     def preprocess(self, segment):
         buffer = BytesIO()
